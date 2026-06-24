@@ -1,0 +1,376 @@
+<!DOCTYPE html>
+<html lang="ro">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Ce pică la BAC? — Pronosticuri Română</title>
+<script type="module">
+  import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
+  import {
+    getFirestore, doc, getDoc, setDoc, updateDoc, onSnapshot, increment
+  } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+
+ const firebaseConfig = {
+  apiKey: "AIzaSyDXORdA_HVpbH5KTAlQBe8lawvQprdjzVI",
+  authDomain: "bac2026-cc033.firebaseapp.com",
+  projectId: "bac2026-cc033",
+  storageBucket: "bac2026-cc033.firebasestorage.app",
+  messagingSenderId: "1074907696238",
+  appId: "1:1074907696238:web:90ba2c6fd9db1787cbaa7f"
+};
+  // ====================================================================
+
+  const app = initializeApp(firebaseConfig);
+  const db = getFirestore(app);
+
+  // Lista oficială de opere pentru BAC română, pe categorii (Epic / Liric / Dramatic)
+  const OPERE = [
+    // ---------- EPIC ----------
+    { id: "creanga-harapalb", autor: "I. Creangă", opera: "Povestea lui Harap-Alb", gen: "basm cult", categorie: "Epic" },
+    { id: "negruzzi-alexandrulapusneanul", autor: "C. Negruzzi", opera: "Alexandru Lăpușneanul", gen: "nuvelă istorică de factură romantică", categorie: "Epic" },
+    { id: "slavici-moaracunoroc", autor: "I. Slavici", opera: "Moara cu noroc", gen: "nuvelă realist psihologică", categorie: "Epic" },
+    { id: "eliade-latiganci", autor: "M. Eliade", opera: "La țigănci", gen: "nuvelă fantastică", categorie: "Epic", perioada: "interbelică" },
+    { id: "sadoveanu-baltagul", autor: "M. Sadoveanu", opera: "Baltagul", gen: "roman tradițional, realist mitic", categorie: "Epic", perioada: "interbelică" },
+    { id: "calinescu-enigmaotiliei", autor: "G. Călinescu", opera: "Enigma Otiliei", gen: "roman realist balzacian", categorie: "Epic", perioada: "interbelică" },
+    { id: "rebreanu-ion", autor: "L. Rebreanu", opera: "Ion", gen: "roman modern realist obiectiv", categorie: "Epic", perioada: "interbelică" },
+    { id: "camil-petrescu-ultimanoapte", autor: "Camil Petrescu", opera: "Ultima noapte de dragoste, întâia noapte de război", gen: "roman modern subiectiv, de analiză psihologică și experiență", categorie: "Epic", perioada: "interbelică" },
+    { id: "marin-preda-morometii", autor: "M. Preda", opera: "Moromeții", gen: "roman realist", categorie: "Epic", perioada: "postbelică" },
+    // ---------- LIRIC ----------
+    { id: "voiculescu-ingradinaghetsemani", autor: "V. Voiculescu", opera: "În Grădina Ghetsemani", gen: "tradiționalism", categorie: "Liric" },
+    { id: "eminescu-floarealbastra-luceafarul", autor: "M. Eminescu", opera: "Floare albastră / Luceafărul", gen: "romantism", categorie: "Liric" },
+    { id: "bacovia-plumb", autor: "G. Bacovia", opera: "Plumb", gen: "simbolism", categorie: "Liric" },
+    { id: "arghezi-testament", autor: "T. Arghezi", opera: "Testament", gen: "modernism", categorie: "Liric" },
+    { id: "blaga-eunustrivesc", autor: "L. Blaga", opera: "Eu nu strivesc corola de minuni a lumii", gen: "modernism", categorie: "Liric" },
+    { id: "barbu-dinceasdedus-jocsecund", autor: "I. Barbu", opera: "Din ceas, dedus... / Joc secund", gen: "modernism", categorie: "Liric" },
+    { id: "barbu-rigacrypto", autor: "I. Barbu", opera: "Riga Crypto și lapona Enigel", gen: "modernism", categorie: "Liric" },
+    { id: "stanescu-leoaicatanara", autor: "N. Stănescu", opera: "Leoaică tânără, iubirea", gen: "neomodernism", categorie: "Liric" },
+    // ---------- DRAMATIC ----------
+    { id: "caragiale-oscrisoarepierduta", autor: "I. L. Caragiale", opera: "O scrisoare pierdută", gen: "comedie", categorie: "Dramatic" },
+    { id: "sorescu-iona", autor: "Marin Sorescu", opera: "Iona", gen: "dramă / tragedie", categorie: "Dramatic", perioada: "postbelică" }
+  ];
+
+  let votedFor = localStorage.getItem("bac_vot_opera"); // ce a votat utilizatorul deja
+  let activeFilter = "Toate";
+
+  function renderList(data) {
+    const total = Object.values(data).reduce((s, v) => s + (v?.count || 0), 0);
+    const container = document.getElementById("lista");
+    container.innerHTML = "";
+
+    const filtered = activeFilter === "Toate"
+      ? OPERE
+      : OPERE.filter(o => o.categorie === activeFilter);
+
+    // sortăm după număr de voturi descrescător
+    const sorted = [...filtered].sort((a, b) => (data[b.id]?.count || 0) - (data[a.id]?.count || 0));
+
+    sorted.forEach(item => {
+      const count = data[item.id]?.count || 0;
+      const pct = total > 0 ? ((count / total) * 100).toFixed(1) : "0.0";
+      const isVoted = votedFor === item.id;
+
+      const card = document.createElement("div");
+      card.className = "card" + (isVoted ? " voted" : "");
+      card.innerHTML = `
+        <div class="card-top">
+          <div>
+            <span class="badge badge-${item.categorie.toLowerCase()}">${item.categorie}</span>
+            ${item.perioada ? `<span class="badge badge-perioada">${item.perioada}</span>` : ""}
+            <div class="opera">${item.opera}</div>
+            <div class="autor">${item.autor} · <span class="gen">${item.gen}</span></div>
+          </div>
+          <button class="vote-btn" data-id="${item.id}" ${votedFor ? "disabled" : ""}>
+            ${isVoted ? "✓ Votat" : "Votează"}
+          </button>
+        </div>
+        <div class="bar-wrap">
+          <div class="bar" style="width:${pct}%"></div>
+        </div>
+        <div class="stats-line">${pct}% · ${count} ${count === 1 ? "vot" : "voturi"}</div>
+      `;
+      container.appendChild(card);
+    });
+
+    document.getElementById("total-voturi").textContent = total;
+
+    container.querySelectorAll(".vote-btn").forEach(btn => {
+      btn.addEventListener("click", () => vote(btn.dataset.id));
+    });
+  }
+
+  async function vote(id) {
+    if (votedFor) return; // deja a votat
+    const ref = doc(db, "voturi", id);
+    try {
+      const snap = await getDoc(ref);
+      if (snap.exists()) {
+        await updateDoc(ref, { count: increment(1) });
+      } else {
+        await setDoc(ref, { count: 1 });
+      }
+      localStorage.setItem("bac_vot_opera", id);
+      votedFor = id;
+    } catch (e) {
+      console.error("Eroare la vot:", e);
+      alert("Nu am putut înregistra votul. Verifică regulile Firestore sau conexiunea.");
+    }
+  }
+
+  let latestData = {};
+
+  function listenAll() {
+    OPERE.forEach(item => {
+      const ref = doc(db, "voturi", item.id);
+      onSnapshot(ref, snap => {
+        latestData[item.id] = snap.exists() ? snap.data() : { count: 0 };
+        renderList(latestData);
+      }, err => {
+        console.error("Eroare ascultare:", err);
+      });
+    });
+  }
+
+  function setupFilters() {
+    document.querySelectorAll(".filter-btn").forEach(btn => {
+      btn.addEventListener("click", () => {
+        activeFilter = btn.dataset.filter;
+        document.querySelectorAll(".filter-btn").forEach(b => b.classList.remove("active"));
+        btn.classList.add("active");
+        renderList(latestData);
+      });
+    });
+  }
+
+  window.addEventListener("DOMContentLoaded", () => {
+    // render inițial cu 0 voturi cât se încarcă din Firebase
+    OPERE.forEach(o => latestData[o.id] = { count: 0 });
+    renderList(latestData);
+    setupFilters();
+    listenAll();
+  });
+</script>
+
+<style>
+  :root {
+    --bg: #faf7f2;
+    --ink: #2b2420;
+    --accent: #8c2f2f;
+    --accent-light: #b85c5c;
+    --gold: #c9a227;
+    --card-bg: #ffffff;
+    --border: #e5ddd2;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: 'Georgia', 'Iowan Old Style', serif;
+    background: var(--bg);
+    color: var(--ink);
+    line-height: 1.5;
+  }
+  header {
+    background: linear-gradient(135deg, var(--accent) 0%, #5e1f1f 100%);
+    color: #fff;
+    padding: 2.5rem 1.5rem 2rem;
+    text-align: center;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+  }
+  header h1 {
+    margin: 0 0 0.4rem;
+    font-size: 1.8rem;
+    letter-spacing: 0.5px;
+  }
+  header p {
+    margin: 0;
+    opacity: 0.9;
+    font-size: 0.95rem;
+    font-style: italic;
+  }
+  .subtitle-note {
+    max-width: 640px;
+    margin: 0 auto;
+    padding: 1.2rem 1.5rem 0.5rem;
+    text-align: center;
+    color: #6b5e4e;
+    font-size: 0.9rem;
+  }
+  main {
+    max-width: 680px;
+    margin: 0 auto;
+    padding: 1rem 1.5rem 3rem;
+  }
+  .total-box {
+    background: var(--card-bg);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 0.9rem 1.2rem;
+    text-align: center;
+    margin-bottom: 1.5rem;
+    font-size: 0.95rem;
+    color: #6b5e4e;
+  }
+  .total-box strong {
+    color: var(--accent);
+    font-size: 1.1rem;
+  }
+  .card {
+    background: var(--card-bg);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 1rem 1.2rem;
+    margin-bottom: 0.8rem;
+    transition: transform 0.15s, box-shadow 0.15s;
+  }
+  .card:hover {
+    box-shadow: 0 3px 10px rgba(0,0,0,0.06);
+  }
+  .card.voted {
+    border-color: var(--gold);
+    background: #fffdf6;
+  }
+  .card-top {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 0.8rem;
+  }
+  .opera {
+    font-size: 1.05rem;
+    font-weight: bold;
+    color: var(--ink);
+  }
+  .autor {
+    font-size: 0.85rem;
+    color: #6b5e4e;
+    margin-top: 0.15rem;
+  }
+  .gen {
+    font-style: italic;
+  }
+  .vote-btn {
+    flex-shrink: 0;
+    background: var(--accent);
+    color: #fff;
+    border: none;
+    border-radius: 6px;
+    padding: 0.5rem 0.9rem;
+    font-size: 0.85rem;
+    cursor: pointer;
+    font-family: inherit;
+    transition: background 0.15s;
+  }
+  .vote-btn:hover:not(:disabled) {
+    background: var(--accent-light);
+  }
+  .vote-btn:disabled {
+    background: #ccc;
+    cursor: not-allowed;
+    opacity: 0.7;
+  }
+  .card.voted .vote-btn {
+    background: var(--gold);
+    opacity: 1;
+    color: #3a2e0f;
+  }
+  .bar-wrap {
+    margin-top: 0.7rem;
+    background: #f0ebe2;
+    border-radius: 5px;
+    height: 8px;
+    overflow: hidden;
+  }
+  .bar {
+    height: 100%;
+    background: linear-gradient(90deg, var(--gold), var(--accent));
+    border-radius: 5px;
+    transition: width 0.4s ease;
+  }
+  .stats-line {
+    margin-top: 0.4rem;
+    font-size: 0.8rem;
+    color: #8a7c68;
+  }
+  .filters {
+    display: flex;
+    gap: 0.5rem;
+    justify-content: center;
+    margin-bottom: 1.3rem;
+    flex-wrap: wrap;
+  }
+  .filter-btn {
+    background: #fff;
+    border: 1px solid var(--border);
+    color: #6b5e4e;
+    padding: 0.45rem 1rem;
+    border-radius: 20px;
+    font-size: 0.85rem;
+    font-family: inherit;
+    cursor: pointer;
+    transition: all 0.15s;
+  }
+  .filter-btn:hover {
+    border-color: var(--accent-light);
+  }
+  .filter-btn.active {
+    background: var(--accent);
+    color: #fff;
+    border-color: var(--accent);
+  }
+  .badge {
+    display: inline-block;
+    font-size: 0.68rem;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    padding: 0.15rem 0.5rem;
+    border-radius: 4px;
+    margin-bottom: 0.35rem;
+    font-weight: bold;
+  }
+  .badge-epic { background: #e8ecf3; color: #3a5278; }
+  .badge-liric { background: #f3e8ec; color: #7a2f4a; }
+  .badge-dramatic { background: #fbf0d9; color: #8a6315; }
+  .badge-perioada {
+    background: #eaf0e8;
+    color: #3e6b35;
+    margin-left: 0.35rem;
+  }
+  footer {
+    text-align: center;
+    padding: 1.5rem;
+    color: #a89a85;
+    font-size: 0.8rem;
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>📖 Ce pică la BAC? — Română</h1>
+  <p>Votează ce operă crezi că apare la subiectul de eseu / comentariu</p>
+</header>
+
+<p class="subtitle-note">
+  Sondaj de pronosticuri între elevi — fără premii, fără bani, doar statistici live despre ce crede comunitatea că va pica la examen.
+</p>
+
+<main>
+  <div class="total-box">
+    Total voturi înregistrate: <strong id="total-voturi">0</strong>
+  </div>
+
+  <div class="filters">
+    <button class="filter-btn active" data-filter="Toate">Toate</button>
+    <button class="filter-btn" data-filter="Epic">Epic</button>
+    <button class="filter-btn" data-filter="Liric">Liric</button>
+    <button class="filter-btn" data-filter="Dramatic">Dramatic</button>
+  </div>
+
+  <div id="lista"><!-- cardurile se generează dinamic --></div>
+</main>
+
+<footer>
+  Fiecare dispozitiv poate vota o singură dată · Datele sunt statistici publice, anonime
+</footer>
+
+</body>
+</html>
