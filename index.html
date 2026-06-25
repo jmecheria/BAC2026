@@ -1305,8 +1305,12 @@
       const promises = OPERE.map(o => deleteDoc(doc(db, "voturi", o.id)));
       await Promise.all(promises);
       OPERE.forEach(o => latestData[o.id] = { count: 0 });
+      // Resetează și localStorage-ul adminului
+      localStorage.removeItem("bac_voturi_set");
+      localStorage.removeItem("bac_vot_opera");
+      votedSet.clear();
       renderList(latestData);
-      alert("Toate voturile au fost șterse.");
+      alert("Toate voturile au fost șterse (Firestore + local).");
     } catch(e) {
       alert("Eroare: " + e.message);
     }
@@ -1314,9 +1318,10 @@
 
   function adminResetMe() {
     localStorage.removeItem("bac_vot_opera");
-    votedFor = null;
+    localStorage.removeItem("bac_voturi_set");
+    votedSet.clear();
     renderList(latestData);
-    alert("Votul tău local a fost resetat. Poți vota din nou.");
+    alert("Voturile tale locale au fost resetate. Poți vota din nou.");
   }
 
   // Override vote function to allow admin to vote unlimited
