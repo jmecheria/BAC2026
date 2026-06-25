@@ -10,7 +10,7 @@
 <script type="module">
   import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
   import {
-    getFirestore, doc, getDoc, setDoc, updateDoc, onSnapshot, increment
+    getFirestore, doc, getDoc, setDoc, updateDoc, deleteDoc, onSnapshot, increment, collection, getDocs
   } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 
   const firebaseConfig = {
@@ -972,7 +972,7 @@
       const ref = doc(db, "voturi", item.id);
       onSnapshot(ref, snap => {
         latestData[item.id] = snap.exists() ? snap.data() : { count: 0 };
-        renderList(latestData);
+        if (isAdmin) renderListPatched(latestData); else renderList(latestData);
       }, err => console.error("Eroare ascultare:", err));
     });
   }
@@ -988,9 +988,108 @@
     });
   }
 
+
+  // ─── ADMIN ───────────────────────────────────────────────────────────────────
+  const ADMIN_PASSWORD = "bac2026admin"; // schimbă parola
+  let isAdmin = sessionStorage.getItem("bac_admin") === "1";
+
+  function renderAdminBar() {
+    const bar = document.getElementById("admin-bar");
+    if (!bar) return;
+    if (isAdmin) {
+      bar.innerHTML = `
+        <div class="admin-bar-inner">
+          <span class="admin-badge">⚙️ MOD ADMIN ACTIV</span>
+          <button class="admin-btn danger" id="btn-reset-all">🗑 Șterge TOATE voturile</button>
+          <button class="admin-btn" id="btn-reset-me">↩ Resetează votul meu</button>
+          <button class="admin-btn dim" id="btn-logout-admin">Ieși din admin</button>
+        </div>`;
+      document.getElementById("btn-reset-all").addEventListener("click", adminResetAll);
+      document.getElementById("btn-reset-me").addEventListener("click", adminResetMe);
+      document.getElementById("btn-logout-admin").addEventListener("click", () => {
+        sessionStorage.removeItem("bac_admin");
+        isAdmin = false;
+        renderAdminBar();
+        renderList(latestData);
+      });
+    } else {
+      bar.innerHTML = ``;
+    }
+  }
+
+  async function adminResetAll() {
+    if (!confirm("Ștergi TOATE voturile din Firestore? Nu se poate anula.")) return;
+    try {
+      const promises = OPERE.map(o => deleteDoc(doc(db, "voturi", o.id)));
+      await Promise.all(promises);
+      OPERE.forEach(o => latestData[o.id] = { count: 0 });
+      renderList(latestData);
+      alert("Toate voturile au fost șterse.");
+    } catch(e) {
+      alert("Eroare: " + e.message);
+    }
+  }
+
+  function adminResetMe() {
+    localStorage.removeItem("bac_vot_opera");
+    votedFor = null;
+    renderList(latestData);
+    alert("Votul tău local a fost resetat. Poți vota din nou.");
+  }
+
+  // Override vote function to allow admin to vote unlimited
+  const _originalVote = vote;
+  async function adminVote(id) {
+    if (!isAdmin) { await _originalVote(id); return; }
+    const ref = doc(db, "voturi", id);
+    try {
+      const snap = await getDoc(ref);
+      if (snap.exists()) {
+        await updateDoc(ref, { count: increment(1) });
+      } else {
+        await setDoc(ref, { count: 1 });
+      }
+      showModal(id);
+    } catch(e) {
+      alert("Eroare la vot: " + e.message);
+    }
+  }
+
+  // Admin login via secret key combo: Ctrl+Shift+A
+  document.addEventListener("keydown", e => {
+    if (e.ctrlKey && e.shiftKey && e.key === "A") {
+      const pw = prompt("Parolă admin:");
+      if (pw === ADMIN_PASSWORD) {
+        isAdmin = true;
+        sessionStorage.setItem("bac_admin", "1");
+        renderAdminBar();
+        renderList(latestData);
+        alert("✅ Mod admin activat!");
+      } else if (pw !== null) {
+        alert("Parolă greșită.");
+      }
+    }
+  });
+
+  // Patch renderList to use adminVote when admin
+  const _originalRenderList = renderList;
+  function renderListPatched(data) {
+    _originalRenderList(data);
+    if (isAdmin) {
+      // Re-enable all vote buttons for admin
+      document.querySelectorAll(".vote-btn").forEach(btn => {
+        btn.disabled = false;
+        btn.textContent = "⚡ Admin Vot";
+        btn.style.background = "#1a6b3a";
+        btn.addEventListener("click", () => adminVote(btn.dataset.id), { once: true });
+      });
+    }
+  }
+
   window.addEventListener("DOMContentLoaded", () => {
     OPERE.forEach(o => latestData[o.id] = { count: 0 });
     renderList(latestData);
+    renderAdminBar();
     setupFilters();
     listenAll();
 
@@ -1037,6 +1136,47 @@
     color: var(--ink);
     line-height: 1.6;
   }
+
+
+  /* ── ADMIN BAR ── */
+  #admin-bar:not(:empty) {
+    background: #0f3d1f;
+    border-bottom: 2px solid #1a6b3a;
+  }
+  .admin-bar-inner {
+    max-width: 720px;
+    margin: 0 auto;
+    padding: 0.6rem 1.5rem;
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    flex-wrap: wrap;
+  }
+  .admin-badge {
+    font-size: 0.75rem;
+    font-weight: 700;
+    letter-spacing: 0.5px;
+    color: #4ade80;
+    text-transform: uppercase;
+    margin-right: 0.5rem;
+  }
+  .admin-btn {
+    background: #1a6b3a;
+    color: #fff;
+    border: 1px solid #2d9d5a;
+    border-radius: 6px;
+    padding: 0.35rem 0.85rem;
+    font-size: 0.78rem;
+    font-family: 'Inter', sans-serif;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background 0.15s;
+  }
+  .admin-btn:hover { background: #22914d; }
+  .admin-btn.danger { background: #7f1d1d; border-color: #dc2626; }
+  .admin-btn.danger:hover { background: #991b1b; }
+  .admin-btn.dim { background: transparent; color: #6b7280; border-color: #374151; }
+  .admin-btn.dim:hover { background: #1f2937; color: #fff; }
 
   /* ── TICKER ── */
   .ticker-wrap {
@@ -1502,6 +1642,7 @@
   <div class="header-accent-line"></div>
 </header>
 
+<div id="admin-bar"></div>
 <p class="subtitle-note">
   Sondaj live de pronosticuri între elevi · fără premii · statistici anonime · după vot primești un eseu structurat complet
 </p>
