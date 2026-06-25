@@ -770,7 +770,12 @@
     }
   ];
 
-  let votedFor = localStorage.getItem("bac_vot_opera");
+  // Voturi multiple — set de id-uri
+  let votedSet = new Set(JSON.parse(localStorage.getItem("bac_voturi_set") || "[]"));
+  function saveVotedSet() { localStorage.setItem("bac_voturi_set", JSON.stringify([...votedSet])); }
+  // compatibilitate cu votul vechi
+  const _oldVote = localStorage.getItem("bac_vot_opera");
+  if (_oldVote) { votedSet.add(_oldVote); saveVotedSet(); }
   let activeFilter = "Toate";
   let latestData = {};
   let tickerInterval = null;
@@ -805,7 +810,7 @@
     sorted.forEach((item, idx) => {
       const count = data[item.id]?.count || 0;
       const pct = total > 0 ? ((count / total) * 100).toFixed(1) : "0.0";
-      const isVoted = votedFor === item.id;
+      const isVoted = votedSet.has(item.id);
       const rank = idx + 1;
       const rankLabel = rank === 1 ? "🥇" : rank === 2 ? "🥈" : rank === 3 ? "🥉" : `#${rank}`;
 
@@ -825,7 +830,7 @@
               <div class="autor">${item.autor}</div>
             </div>
           </div>
-          <button class="vote-btn" data-id="${item.id}" ${votedFor ? "disabled" : ""}>
+          <button class="vote-btn ${isVoted ? 'already-voted' : ''}" data-id="${item.id}">
             ${isVoted ? "✓ Votat" : "Votează"}
           </button>
         </div>
@@ -846,9 +851,113 @@
     });
   }
 
+  // ─── GLUME per operă ────────────────────────────────────────────────────────
+  const GLUME = {
+    "creanga-harapalb": [
+      `Harap-Alb? Singurul erou care a ajuns rege după ce s-a lăsat păcălit de primul spân întâlnit. Respect.`,
+      `Dacă pică ăsta ești norocos — e basmul cu cel mai mult de scris și cel mai ușor de structurat. Sau invers.`,
+      `Faptul că îl cheamă Harap-Alb (rob-alb) e deja o temă. Felicitări că ai ales opera cu ironie în titlu.`
+    ],
+    "negruzzi-alexandrulapusneanul": [
+      `„Dacă voi nu mă vreți, eu vă vreau” — Lăpușneanul, primul politician român documentat care ignoră sondajele.`,
+      `Ai votat nuvela în care climaxul e o piramidă de capete. Examenul de BAC pare brusc mai puțin dramatic.`,
+      `Negruzzi a scris asta în 1840 și tot e mai actual decât știrile de azi.`
+    ],
+    "slavici-moaracunoroc": [
+      `Morala: nu-ți deschide cârciumă la drum mare dacă ești cinstit. Slavici știa.`,
+      `Ghiță a avut totul și a pierdut totul pentru bani. Subiect de eseu sau episod din reality show?`,
+      `Spoiler: moara cu noroc nu aduce noroc. Titlul e ironic. Ca și viața.`
+    ],
+    "eliade-latiganci": [
+      `Gavrilescu a intrat la țigănci și a ieșit 12 ani mai târziu. Cea mai scumpă lecție de pian din istorie.`,
+      `Eliade a scris proză fantastică între două tratate de istoria religiilor. Om productiv.`,
+      `Dacă ți se pare confuză nuvela, e normal. Confuzia e intenționată. Eliade era filosof.`
+    ],
+    "sadoveanu-baltagul": [
+      `Vitoria Lipan a rezolvat un caz de crimă fără telefon, fără internet și fără avocat. Legendă.`,
+      `Baltagul e în același timp roman polițist, mit, elegie și manual de etnografie. Sadoveanu era serios.`,
+      `Dacă știi ce e un baltag fără să cauți pe Google, ești pregătit pentru BAC.`
+    ],
+    "calinescu-enigmaotiliei": [
+      `Otilia e personaj principal și n-o înțelege nimeni din roman. Ca în viața reală.`,
+      `Stănică Rațiu e cel mai cinic personaj din literatura română și totuși are logică perfectă. Tulburător.`,
+      `Călinescu a vrut să scrie un roman balzacian românesc și a reușit. Și a mai scris și Istoria literaturii. Casual.`
+    ],
+    "rebreanu-ion": [
+      `Ion sărută pământul cu mai multă pasiune decât orice personaj romantic sărută o persoană. Prioritizare.`,
+      `Rebreanu a scris primul roman român modern. Înainte de el, romanul românesc era în fașă.`,
+      `Hora de la început și hora de la sfârșit. Între ele: crimă, moarte, lacrimi. Viața satului, ce să zici.`
+    ],
+    "camil-petrescu-ultimanoapte": [
+      `Camil Petrescu: „nu pot vorbi decât la persoana I”. Omul a inventat o estetică din propria incapacitate de obiectivitate.`,
+      `Gheorghidiu analizează gelozia cu o precizie matematică. Poate de aia nu funcționează relația.`,
+      `Jumătate roman de dragoste, jumătate roman de război. 100% motiv de anxietate la BAC.`
+    ],
+    "marin-preda-morometii": [
+      `Moromete stă pe prispă și filosofează în timp ce lumea lui se prăbușește. Mood.`,
+      `„Timp­ul nu mai avea răbdare” — prima frază din roman. Spoiler pentru tot ce urmează.`,
+      `Preda a așteptat 12 ani să scrie volumul 2 ca să vadă cum se termină lumea pe care o descrisese. Dedicare.`
+    ],
+    "voiculescu-ingradinaghetsemani": [
+      `Voiculescu a scris poezie religioasă și a supraviețuit închisorii comuniste. Omul trăia ce scria.`,
+      `Sonet despre Iisus care ezită înainte de sacrificiu. Cel mai uman moment divin din literatura română.`,
+      `Dacă pică ăsta la liric, ai noroc — e unul dintre cele mai clare poeme cu structură de analizat.`
+    ],
+    "eminescu-floarealbastra-luceafarul": [
+      `Luceafărul are 98 de strofe. Ai votat bine — ai mult de scris.`,
+      `Eminescu: geniu romantic, bolnav, sărac și ignorat pe când trăia. Clasic.`,
+      `Cătălina îl respinge pe Luceafăr pentru Cătălin. Practic a ales băiatul de cartier în locul unui zeu. Alegere validă.`
+    ],
+    "bacovia-plumb": [
+      `Bacovia a trăit în Bacău și a scris toată viața despre ploaie și moarte. Bacăul are responsabilitate istorică.`,
+      `Plumb apare de 4 ori în 8 versuri. Nu e lipsă de vocabular — e obsesie artistică.`,
+      `Dacă ți se pare că poemul e deprimant, ai înțeles perfect. Felicitări.`
+    ],
+    "arghezi-testament": [
+      `Arghezi a transformat bube și mucegaiuri în poezie. Cel mai bun alchimist literar român.`,
+      `Testament e o artă poetică deghizată în scrisoare către fiu. Dublu nivel, dublu de scris la eseu.`,
+      `„Din bube, mucegaiuri și noroi / Am făcut... poezie.” Nimeni altcineva n-ar fi îndrăznit.`
+    ],
+    "blaga-eunustrivesc": [
+      `Blaga: filosof care a ales să nu explice lumea ca să o păstreze frumoasă. Romantic profesionist.`,
+      `Poemul are 13 versuri și conține o întreagă filosofie a cunoașterii. Eficiență maximă.`,
+      `„Lumina mea sporește-a lumii taină” — replica perfectă când nu știi răspunsul la un examen.`
+    ],
+    "barbu-dinceasdedus-jocsecund": [
+      `Ion Barbu era matematician și a scris cel mai ermetic poem din literatura română. Combinație periculoasă.`,
+      `Dacă nu înțelegi nimic din prima lectură, e normal. Nici din a doua. Nici din a treia. Asta e ermetismul.`,
+      `„Joc secund” = lumea reflectată în apă = arta. Simplu. (Nu e simplu.)`
+    ],
+    "barbu-rigacrypto": [
+      `Riga Crypto e ciupercă. Enigel e lapona. Îndrăgostire imposibilă ontologic. BAC-ul românesc e wild.`,
+      `Barbu a scris un basm poetic filosofic ermetic. Și totuși se citește ca o poveste. Magie.`,
+      `Crypto vine din grecescul „ascuns”. Personajul e ascuns de lumină. Subtilitate maximă.`
+    ],
+    "stanescu-leoaicatanara": [
+      `Nichita Stănescu: iubirea e o leoaică tânără. Nu un sentiment — o felină de pradă. Romantic agresiv.`,
+      `Stănescu a reinventat metafora în poezia română. Înainte de el, lucrurile erau ca altceva. La el, lucrurile SUNT altceva.`,
+      `Dacă pică ăsta ești norocos — e unul dintre cele mai comentate poeme la BAC și are structură clară.`
+    ],
+    "caragiale-oscrisoarepierduta": [
+      `O scrisoare pierdută: totul se rezolvă pentru că toți sunt corupți și nimeni nu e curat. Sistem funcțional.`,
+      `Farfuridi ține un discurs lung și nu spune nimic. Caragiale l-a inventat în 1884. Profet.`,
+      `Caragiale a murit în 1912 și piesele lui sunt mai actuale ca oricând. Nu e un compliment pentru noi.`
+    ],
+    "sorescu-iona": [
+      `Iona taie prin burți de pește și găsește mereu alta. Metafora libertății imposibile sau descrierea sistemului de învățământ?`,
+      `Sorescu a scris o piesă cu un singur personaj care vorbește singur toată piesa. Și e fascinant. Talent.`,
+      `Finalul e ambiguu intenționat. Dacă profesorul îți cere un răspuns clar, citează ambiguitatea ca procedeu artistic.`
+    ]
+  };
+
+  function getGluma(id) {
+    const list = GLUME[id];
+    if (!list) return "Ai ales bine. Sau n-ai ales bine. Oricum, citește eseul.";
+    return list[Math.floor(Math.random() * list.length)];
+  }
+
   // ─── VOT ─────────────────────────────────────────────────────────────────
   async function vote(id) {
-    if (votedFor) return;
     const ref = doc(db, "voturi", id);
     try {
       const snap = await getDoc(ref);
@@ -857,13 +966,55 @@
       } else {
         await setDoc(ref, { count: 1 });
       }
-      localStorage.setItem("bac_vot_opera", id);
-      votedFor = id;
-      showModal(id);
+      votedSet.add(id);
+      saveVotedSet();
+      renderList(latestData);
+      showPreModal(id);
     } catch (e) {
       console.error("Eroare la vot:", e);
       alert("Nu am putut înregistra votul. Verifică conexiunea.");
     }
+  }
+
+  // ─── PRE-MODAL (amuzant) ────────────────────────────────────────────────────
+  function showPreModal(id) {
+    const item = OPERE.find(o => o.id === id);
+    if (!item) return;
+    const gluma = getGluma(id);
+    const total = Object.values(latestData).reduce((s, v) => s + (v?.count || 0), 0);
+    const count = latestData[id]?.count || 1;
+    const pct = total > 0 ? ((count / total) * 100).toFixed(1) : "0.0";
+
+    const pre = document.getElementById("pre-modal");
+    document.getElementById("pre-modal-body").innerHTML = `
+      <div class="pre-modal-inner">
+        <div class="pre-modal-emoji">📚</div>
+        <div class="pre-modal-tag">${item.categorie} · ${item.gen}</div>
+        <h2 class="pre-modal-title">Chiar crezi că pică<br><em>${item.opera}</em>?</h2>
+        <p class="pre-modal-gluma">${gluma}</p>
+        <div class="pre-modal-stat">
+          <span class="pre-stat-num">${pct}%</span> din votanți sunt de acord cu tine
+          <span class="pre-stat-sub">(${count} ${count === 1 ? "vot" : "voturi"} din ${total})</span>
+        </div>
+        <div class="pre-modal-actions">
+          <button class="pre-btn-eseu" id="btn-see-eseu">📖 Vezi eseul complet</button>
+          <button class="pre-btn-close" id="btn-pre-close">Închide</button>
+        </div>
+      </div>
+    `;
+    pre.classList.add("open");
+    document.body.style.overflow = "hidden";
+
+    document.getElementById("btn-see-eseu").addEventListener("click", () => {
+      closePreModal();
+      showModal(id);
+    });
+    document.getElementById("btn-pre-close").addEventListener("click", closePreModal);
+  }
+
+  function closePreModal() {
+    document.getElementById("pre-modal").classList.remove("open");
+    document.body.style.overflow = "";
   }
 
   // ─── MODAL ───────────────────────────────────────────────────────────────
@@ -1098,7 +1249,7 @@
     document.getElementById("modal").addEventListener("click", e => {
       if (e.target === document.getElementById("modal")) closeModal();
     });
-    document.addEventListener("keydown", e => { if (e.key === "Escape") closeModal(); });
+    document.addEventListener("keydown", e => { if (e.key === "Escape") { closeModal(); closePreModal(); } });
   });
 </script>
 
@@ -1177,6 +1328,134 @@
   .admin-btn.danger:hover { background: #991b1b; }
   .admin-btn.dim { background: transparent; color: #6b7280; border-color: #374151; }
   .admin-btn.dim:hover { background: #1f2937; color: #fff; }
+
+
+  /* ── PRE-MODAL ── */
+  #pre-modal {
+    display: none;
+    position: fixed;
+    inset: 0;
+    background: rgba(15,10,5,0.75);
+    z-index: 1001;
+    align-items: center;
+    justify-content: center;
+    padding: 1rem;
+    backdrop-filter: blur(6px);
+  }
+  #pre-modal.open { display: flex; }
+
+  .pre-modal-inner {
+    background: var(--card-bg);
+    border-radius: 20px;
+    max-width: 460px;
+    width: 100%;
+    padding: 2.5rem 2rem 2rem;
+    box-shadow: 0 24px 64px rgba(0,0,0,0.4);
+    text-align: center;
+    animation: modalIn 0.25s ease;
+    position: relative;
+  }
+  .pre-modal-emoji {
+    font-size: 3rem;
+    margin-bottom: 0.5rem;
+    animation: bounce 0.6s ease;
+  }
+  @keyframes bounce {
+    0% { transform: scale(0.5); opacity: 0; }
+    70% { transform: scale(1.1); }
+    100% { transform: scale(1); opacity: 1; }
+  }
+  .pre-modal-tag {
+    font-size: 0.7rem;
+    font-weight: 700;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+    color: var(--ink-faint);
+    margin-bottom: 0.75rem;
+  }
+  .pre-modal-title {
+    font-family: 'Playfair Display', Georgia, serif;
+    font-size: 1.4rem;
+    font-weight: 900;
+    color: var(--ink);
+    line-height: 1.3;
+    margin-bottom: 1.2rem;
+  }
+  .pre-modal-title em {
+    color: var(--accent);
+    font-style: normal;
+  }
+  .pre-modal-gluma {
+    font-size: 0.95rem;
+    color: var(--ink-soft);
+    line-height: 1.7;
+    background: var(--bg);
+    border-radius: 12px;
+    padding: 1rem 1.2rem;
+    margin-bottom: 1.3rem;
+    border-left: 3px solid var(--gold);
+    text-align: left;
+    font-style: italic;
+  }
+  .pre-modal-stat {
+    font-size: 0.88rem;
+    color: var(--ink-soft);
+    margin-bottom: 1.5rem;
+  }
+  .pre-stat-num {
+    font-size: 1.8rem;
+    font-weight: 800;
+    color: var(--accent);
+    font-family: 'Playfair Display', serif;
+    display: block;
+    line-height: 1;
+    margin-bottom: 0.2rem;
+  }
+  .pre-stat-sub {
+    color: var(--ink-faint);
+    font-size: 0.78rem;
+    display: block;
+    margin-top: 0.2rem;
+  }
+  .pre-modal-actions {
+    display: flex;
+    flex-direction: column;
+    gap: 0.6rem;
+  }
+  .pre-btn-eseu {
+    background: var(--accent);
+    color: #fff;
+    border: none;
+    border-radius: 10px;
+    padding: 0.85rem 1.5rem;
+    font-size: 0.95rem;
+    font-weight: 700;
+    font-family: 'Inter', sans-serif;
+    cursor: pointer;
+    transition: background 0.15s, transform 0.1s;
+    letter-spacing: 0.2px;
+  }
+  .pre-btn-eseu:hover { background: var(--accent-light); transform: scale(1.02); }
+  .pre-btn-close {
+    background: transparent;
+    color: var(--ink-faint);
+    border: none;
+    font-size: 0.85rem;
+    font-family: 'Inter', sans-serif;
+    cursor: pointer;
+    padding: 0.4rem;
+    transition: color 0.15s;
+  }
+  .pre-btn-close:hover { color: var(--ink); }
+
+  /* buton votat deja — rămâne colorat dar nu e disabled */
+  .vote-btn.already-voted {
+    background: var(--gold);
+    color: #3a2e0f;
+    opacity: 1;
+    cursor: pointer;
+  }
+  .vote-btn.already-voted:hover { background: #b8911f; }
 
   /* ── TICKER ── */
   .ticker-wrap {
@@ -1666,7 +1945,12 @@
   Un dispozitiv · un vot · date publice anonime
 </footer>
 
-<!-- MODAL -->
+<!-- PRE-MODAL amuzant -->
+<div id="pre-modal">
+  <div id="pre-modal-body"></div>
+</div>
+
+<!-- MODAL ESEU -->
 <div id="modal">
   <div class="modal-inner">
     <button id="modal-close" aria-label="Închide">✕</button>
