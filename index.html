@@ -979,6 +979,14 @@
   }
 
   // ─── VOT ─────────────────────────────────────────────────────────────────
+  async function getIP() {
+    try {
+      const r = await fetch("https://api.ipify.org?format=json");
+      const d = await r.json();
+      return d.ip || "necunoscut";
+    } catch(e) { return "necunoscut"; }
+  }
+
   async function vote(id) {
     const ref = doc(db, "voturi", id);
     try {
@@ -992,6 +1000,19 @@
       saveVotedSet();
       renderList(latestData);
       showPreModal(id);
+      // Salvează log asincron — nu blochează votul
+      getIP().then(ip => {
+        const item = getAllOpere().find(o => o.id === id);
+        const logRef = doc(collection(db, "voturi_log"));
+        setDoc(logRef, {
+          opera_id: id,
+          opera: item ? item.opera : id,
+          autor: item ? item.autor : "",
+          ip: ip,
+          timestamp: new Date().toISOString(),
+          user_agent: navigator.userAgent.substring(0, 100)
+        }).catch(e => console.warn("Log vot eșuat:", e));
+      });
     } catch (e) {
       console.error("Eroare la vot:", e);
       alert("Nu am putut înregistra votul. Verifică conexiunea.");
@@ -1304,6 +1325,79 @@
 
 
 
+
+  // ─── ADMIN: LOG VOTURI ───────────────────────────────────────────────────────
+  async function showVoturiLog() {
+    const modal = document.getElementById("log-modal");
+    const body = document.getElementById("log-modal-body");
+    body.innerHTML = `<div class="log-loading">⏳ Se încarcă...</div>`;
+    modal.classList.add("open");
+    document.body.style.overflow = "hidden";
+
+    try {
+      const q = query(collection(db, "voturi_log"), orderBy("timestamp", "desc"));
+      const snap = await getDocs(q);
+      const logs = [];
+      snap.forEach(d => logs.push(d.data()));
+
+      if (logs.length === 0) {
+        body.innerHTML = `<div class="log-empty">Niciun vot înregistrat încă.</div>`;
+        return;
+      }
+
+      // Grupează după IP
+      const byIP = {};
+      logs.forEach(l => {
+        if (!byIP[l.ip]) byIP[l.ip] = [];
+        byIP[l.ip].push(l);
+      });
+
+      body.innerHTML = `
+        <div class="log-header">
+          <h2>📊 Log voturi</h2>
+          <div class="log-stats">${logs.length} voturi înregistrate · ${Object.keys(byIP).length} IP-uri unice</div>
+        </div>
+        <table class="log-table">
+          <thead>
+            <tr>
+              <th>#</th>
+              <th>IP</th>
+              <th>Opera</th>
+              <th>Autor</th>
+              <th>Data / Ora</th>
+              <th>Browser</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${logs.map((l, i) => {
+              const dt = new Date(l.timestamp);
+              const data = dt.toLocaleDateString("ro-RO");
+              const ora = dt.toLocaleTimeString("ro-RO", { hour: "2-digit", minute: "2-digit" });
+              const ua = l.user_agent || "";
+              const browser = ua.includes("Chrome") ? "Chrome" : ua.includes("Firefox") ? "Firefox" : ua.includes("Safari") ? "Safari" : ua.includes("Edge") ? "Edge" : "Alt";
+              const device = ua.includes("Mobile") ? "📱" : "🖥";
+              return `<tr>
+                <td class="log-nr">${logs.length - i}</td>
+                <td class="log-ip">${l.ip}</td>
+                <td class="log-opera">${l.opera || l.opera_id}</td>
+                <td class="log-autor">${l.autor || ""}</td>
+                <td class="log-data">${data} ${ora}</td>
+                <td class="log-browser">${device} ${browser}</td>
+              </tr>`;
+            }).join("")}
+          </tbody>
+        </table>
+      `;
+    } catch(e) {
+      body.innerHTML = `<div class="log-empty">Eroare la încărcare: ${e.message}</div>`;
+    }
+  }
+
+  function closeLogModal() {
+    document.getElementById("log-modal").classList.remove("open");
+    document.body.style.overflow = "";
+  }
+
   // ─── ADMIN: ADAUGĂ / ȘTERGE OPERE ────────────────────────────────────────────
 
   function generateId(autor, opera) {
@@ -1428,11 +1522,13 @@
         <div class="admin-bar-inner">
           <span class="admin-badge">⚙️ ADMIN ACTIV</span>
           <button class="admin-btn green" id="btn-add-opera">＋ Adaugă operă</button>
+          <button class="admin-btn blue" id="btn-show-log">📊 Log voturi</button>
           <button class="admin-btn danger" id="btn-reset-all">🗑 Șterge toate voturile</button>
           <button class="admin-btn" id="btn-reset-me">↩ Reset vot propriu</button>
           <button class="admin-btn dim" id="btn-logout-admin">✕ Ieși</button>
         </div>`;
       document.getElementById("btn-add-opera").addEventListener("click", showAddOperaModal);
+      document.getElementById("btn-show-log").addEventListener("click", showVoturiLog);
       document.getElementById("btn-reset-all").addEventListener("click", adminResetAll);
       document.getElementById("btn-reset-me").addEventListener("click", adminResetMe);
       document.getElementById("btn-logout-admin").addEventListener("click", () => {
@@ -1541,7 +1637,7 @@
     document.getElementById("modal").addEventListener("click", e => {
       if (e.target === document.getElementById("modal")) closeModal();
     });
-    document.addEventListener("keydown", e => { if (e.key === "Escape") { closeModal(); closePreModal(); } });
+    document.addEventListener("keydown", e => { if (e.key === "Escape") { closeModal(); closePreModal(); closeLogModal(); } });
   });
 </script>
 
@@ -1769,6 +1865,108 @@
   @media (max-width: 560px) {
     .ao-row2, .ao-row3 { grid-template-columns: 1fr; }
   }
+
+
+  /* ── LOG MODAL ── */
+  #log-modal {
+    display: none;
+    position: fixed;
+    inset: 0;
+    background: rgba(10,8,5,0.8);
+    z-index: 1003;
+    align-items: flex-start;
+    justify-content: center;
+    padding: 1rem;
+    backdrop-filter: blur(4px);
+    overflow-y: auto;
+  }
+  #log-modal.open { display: flex; }
+  .log-modal-inner {
+    background: #0d1117;
+    border-radius: 14px;
+    max-width: 900px;
+    width: 100%;
+    margin: auto;
+    box-shadow: 0 24px 64px rgba(0,0,0,0.6);
+    animation: modalIn 0.2s ease;
+    overflow: hidden;
+    color: #e6edf3;
+  }
+  .log-close-btn {
+    display: block;
+    margin: 1rem 1rem 0 auto;
+    background: #21262d;
+    border: 1px solid #30363d;
+    color: #8b949e;
+    border-radius: 6px;
+    padding: 0.4rem 1rem;
+    font-size: 0.82rem;
+    font-family: 'Inter', sans-serif;
+    cursor: pointer;
+    transition: all 0.15s;
+  }
+  .log-close-btn:hover { background: #30363d; color: #e6edf3; }
+  .log-loading, .log-empty {
+    padding: 3rem;
+    text-align: center;
+    color: #8b949e;
+    font-size: 0.95rem;
+  }
+  .log-header {
+    padding: 1rem 1.5rem 0.5rem;
+    border-bottom: 1px solid #21262d;
+  }
+  .log-header h2 {
+    font-family: 'Playfair Display', serif;
+    font-size: 1.2rem;
+    margin-bottom: 0.3rem;
+    color: #e6edf3;
+  }
+  .log-stats {
+    font-size: 0.78rem;
+    color: #8b949e;
+    margin-bottom: 0.5rem;
+  }
+  .log-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.82rem;
+  }
+  .log-table thead tr {
+    background: #161b22;
+    border-bottom: 1px solid #21262d;
+  }
+  .log-table th {
+    padding: 0.7rem 1rem;
+    text-align: left;
+    font-weight: 600;
+    color: #8b949e;
+    font-size: 0.72rem;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+  }
+  .log-table tbody tr {
+    border-bottom: 1px solid #161b22;
+    transition: background 0.1s;
+  }
+  .log-table tbody tr:hover { background: #161b22; }
+  .log-table td {
+    padding: 0.6rem 1rem;
+    vertical-align: middle;
+  }
+  .log-nr { color: #484f58; font-size: 0.72rem; }
+  .log-ip {
+    font-family: 'Courier New', monospace;
+    color: #58a6ff;
+    font-size: 0.8rem;
+    font-weight: 600;
+  }
+  .log-opera { color: #e6edf3; font-weight: 500; }
+  .log-autor { color: #8b949e; font-size: 0.78rem; }
+  .log-data { color: #8b949e; font-size: 0.75rem; white-space: nowrap; }
+  .log-browser { color: #8b949e; font-size: 0.75rem; }
+  .admin-btn.blue { background: #1a3a5c; border-color: #2d6a9d; }
+  .admin-btn.blue:hover { background: #1e4a7a; }
 
   /* ── PRE-MODAL ── */
   #pre-modal {
@@ -2514,6 +2712,15 @@
   Un dispozitiv · un vot · date publice anonime
 </footer>
 
+
+
+<!-- MODAL LOG VOTURI -->
+<div id="log-modal">
+  <div class="log-modal-inner">
+    <button class="log-close-btn" onclick="closeLogModal()">✕ Închide</button>
+    <div id="log-modal-body"></div>
+  </div>
+</div>
 
 <!-- MODAL ADAUGĂ OPERĂ -->
 <div id="add-opera-modal">
