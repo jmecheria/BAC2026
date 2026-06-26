@@ -818,7 +818,7 @@
       card.className = "card" + (isVoted ? " voted" : "");
       card.innerHTML = `
         <div class="card-top">
-          <div class="card-info">
+          <div class="card-info card-clickable" data-id="${item.id}">
             <div class="card-rank">${rankLabel}</div>
             <div>
               <div class="badges-row">
@@ -826,13 +826,16 @@
                 ${item.perioada ? `<span class="badge badge-perioada">${item.perioada}</span>` : ""}
                 <span class="badge badge-gen">${item.gen}</span>
               </div>
-              <div class="opera">${item.opera}</div>
+              <div class="opera">${item.opera} <span class="card-read-hint">📖</span></div>
               <div class="autor">${item.autor}</div>
             </div>
           </div>
-          <button class="vote-btn ${isVoted ? 'already-voted' : ''}" data-id="${item.id}">
-            ${isVoted ? "✓ Votat" : "Votează"}
-          </button>
+          <div class="vote-actions">
+            <button class="vote-btn" data-id="${item.id}">
+              ${isVoted ? "✓ Votat" : "Votează"}
+            </button>
+            ${isVoted ? `<button class="delete-vote-btn" data-id="${item.id}" title="Sterge votul">✕</button>` : ""}
+          </div>
         </div>
         <div class="bar-wrap">
           <div class="bar" style="width:${pct}%"></div>
@@ -846,8 +849,14 @@
     document.getElementById("total-voturi").textContent = total;
     updateTicker();
 
+    container.querySelectorAll(".card-clickable").forEach(el => {
+      el.addEventListener("click", () => showModal(el.dataset.id));
+    });
     container.querySelectorAll(".vote-btn").forEach(btn => {
-      btn.addEventListener("click", () => vote(btn.dataset.id));
+      btn.addEventListener("click", e => { e.stopPropagation(); vote(btn.dataset.id); });
+    });
+    container.querySelectorAll(".delete-vote-btn").forEach(btn => {
+      btn.addEventListener("click", e => { e.stopPropagation(); deleteVote(btn.dataset.id); });
     });
   }
 
@@ -973,6 +982,26 @@
     } catch (e) {
       console.error("Eroare la vot:", e);
       alert("Nu am putut înregistra votul. Verifică conexiunea.");
+    }
+  }
+
+  // ─── ȘTERGE VOT ──────────────────────────────────────────────────────────────
+  async function deleteVote(id) {
+    if (!votedSet.has(id)) return;
+    const ref = doc(db, "voturi", id);
+    try {
+      const snap = await getDoc(ref);
+      if (snap.exists() && snap.data().count > 1) {
+        await updateDoc(ref, { count: increment(-1) });
+      } else {
+        await deleteDoc(ref);
+      }
+      votedSet.delete(id);
+      saveVotedSet();
+      renderList(latestData);
+    } catch(e) {
+      console.error("Eroare la stergere vot:", e);
+      alert("Nu am putut sterge votul.");
     }
   }
 
@@ -1214,6 +1243,8 @@
       makeEditable(body.querySelector("#ef-bio"), id, "biografie");
       makeEditable(body.querySelector("#ef-tema"), id, "tema");
       makeEditable(body.querySelector("#ef-tema2"), id, "tema");
+      makeEditable(body.querySelector("#ef-specie"), id, "specie");
+      makeEditable(body.querySelector("#ef-curent"), id, "curent");
       e.incadrare.forEach((_, i) => {
         makeEditable(body.querySelector(`#ef-inc-${i}-element`), id, `incadrare.${i}.element`);
         makeEditable(body.querySelector(`#ef-inc-${i}-comentariu`), id, `incadrare.${i}.comentariu`);
@@ -1666,6 +1697,47 @@
     cursor: pointer;
   }
   .edit-cancel-btn:hover { color: var(--ink); }
+
+
+  /* ── CARD CLICKABLE + VOTE ACTIONS ── */
+  .card-clickable {
+    cursor: pointer;
+    flex: 1;
+    border-radius: 8px;
+    transition: background 0.15s;
+    padding: 0.2rem 0.4rem 0.2rem 0;
+  }
+  .card-clickable:hover { background: rgba(140,47,47,0.05); }
+  .card-clickable:hover .card-read-hint { opacity: 1; }
+  .card-read-hint {
+    font-size: 0.8rem;
+    opacity: 0;
+    transition: opacity 0.15s;
+  }
+  .vote-actions {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 0.4rem;
+    flex-shrink: 0;
+  }
+  .delete-vote-btn {
+    background: transparent;
+    border: 1px solid #e5ddd2;
+    color: #b55;
+    border-radius: 6px;
+    padding: 0.25rem 0.6rem;
+    font-size: 0.72rem;
+    font-weight: 700;
+    cursor: pointer;
+    font-family: 'Inter', sans-serif;
+    transition: all 0.15s;
+    line-height: 1;
+  }
+  .delete-vote-btn:hover {
+    background: #fdf0f0;
+    border-color: #b55;
+  }
 
   /* ── TICKER ── */
   .ticker-wrap {
