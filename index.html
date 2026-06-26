@@ -1286,7 +1286,7 @@
       const ref = doc(db, "voturi", item.id);
       onSnapshot(ref, snap => {
         latestData[item.id] = snap.exists() ? snap.data() : { count: 0 };
-        if (isAdmin) renderListPatched(latestData); else renderList(latestData);
+        renderList(latestData);
       }, err => console.error("Eroare ascultare:", err));
     });
   }
@@ -1453,6 +1453,7 @@
           sessionStorage.setItem("bac_admin", "1");
           renderAdminBar();
           renderList(latestData);
+          
         } else if (pw !== null) {
           alert("Parolă greșită.");
         }
@@ -1505,20 +1506,7 @@
 
 
 
-  // Patch renderList to use adminVote when admin
-  const _originalRenderList = renderList;
-  function renderListPatched(data) {
-    _originalRenderList(data);
-    if (isAdmin) {
-      // Re-enable all vote buttons for admin
-      document.querySelectorAll(".vote-btn").forEach(btn => {
-        btn.disabled = false;
-        btn.textContent = "⚡ Admin Vot";
-        btn.style.background = "#1a6b3a";
-        btn.addEventListener("click", () => adminVote(btn.dataset.id), { once: true });
-      });
-    }
-  }
+
 
   async function loadOpereCustom() {
     try {
