@@ -10,7 +10,7 @@
 <script type="module">
   import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
   import {
-    getFirestore, doc, getDoc, setDoc, updateDoc, deleteDoc, onSnapshot, increment, collection, getDocs
+    getFirestore, doc, getDoc, setDoc, updateDoc, deleteDoc, onSnapshot, increment, collection, getDocs, query, orderBy
   } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 
   const firebaseConfig = {
@@ -772,6 +772,7 @@
 
   // Voturi multiple — set de id-uri
   let votedSet = new Set(JSON.parse(localStorage.getItem("bac_voturi_set") || "[]"));
+  function getAllOpere() { return [...OPERE, ...OPERE_CUSTOM]; }
   function saveVotedSet() { localStorage.setItem("bac_voturi_set", JSON.stringify([...votedSet])); }
   // compatibilitate cu votul vechi
   const _oldVote = localStorage.getItem("bac_vot_opera");
@@ -784,7 +785,7 @@
   function updateTicker() {
     const total = Object.values(latestData).reduce((s, v) => s + (v?.count || 0), 0);
     if (total === 0) return;
-    const sorted = [...OPERE].sort((a, b) => (latestData[b.id]?.count || 0) - (latestData[a.id]?.count || 0));
+    const sorted = [...getAllOpere()].sort((a, b) => (latestData[b.id]?.count || 0) - (latestData[a.id]?.count || 0));
     const top = sorted[0];
     const topCount = latestData[top.id]?.count || 0;
     const topPct = ((topCount / total) * 100).toFixed(1);
@@ -804,7 +805,7 @@
     const container = document.getElementById("lista");
     container.innerHTML = "";
 
-    const filtered = activeFilter === "Toate" ? OPERE : OPERE.filter(o => o.categorie === activeFilter);
+    const filtered = activeFilter === "Toate" ? getAllOpere() : getAllOpere().filter(o => o.categorie === activeFilter);
     const sorted = [...filtered].sort((a, b) => (data[b.id]?.count || 0) - (data[a.id]?.count || 0));
 
     sorted.forEach((item, idx) => {
@@ -841,7 +842,10 @@
           <div class="bar" style="width:${pct}%"></div>
           <span class="bar-pct">${pct}%</span>
         </div>
-        <div class="stats-line">${count} ${count === 1 ? "vot" : "voturi"}</div>
+        <div class="stats-line">
+          ${count} ${count === 1 ? "vot" : "voturi"}
+          ${isAdmin && item._custom ? `<button class="delete-opera-btn" data-id="${item.id}">🗑 Șterge opera</button>` : ""}
+        </div>
       `;
       container.appendChild(card);
     });
@@ -857,6 +861,9 @@
     });
     container.querySelectorAll(".delete-vote-btn").forEach(btn => {
       btn.addEventListener("click", e => { e.stopPropagation(); deleteVote(btn.dataset.id); });
+    });
+    container.querySelectorAll(".delete-opera-btn").forEach(btn => {
+      btn.addEventListener("click", e => { e.stopPropagation(); adminDeleteOpera(btn.dataset.id); });
     });
   }
 
@@ -1007,7 +1014,7 @@
 
   // ─── PRE-MODAL (amuzant) ────────────────────────────────────────────────────
   function showPreModal(id) {
-    const item = OPERE.find(o => o.id === id);
+    const item = getAllOpere().find(o => o.id === id);
     if (!item) return;
     const gluma = getGluma(id);
     const total = Object.values(latestData).reduce((s, v) => s + (v?.count || 0), 0);
@@ -1141,7 +1148,7 @@
 
   // ─── MODAL ───────────────────────────────────────────────────────────────
   async function showModal(id) {
-    const item = OPERE.find(o => o.id === id);
+    const item = getAllOpere().find(o => o.id === id);
     if (!item) return;
     const modal = document.getElementById("modal");
     const body = document.getElementById("modal-body");
@@ -1230,7 +1237,7 @@
 
         <div class="intro-box concluzie-box">
           <div class="intro-label">CONCLUZIE</div>
-          <p>${item.opera} de ${item.autor} rămâne o creație definitorie pentru ${e.curent} și pentru literatura română în ansamblu. Prin ${e.tema}, opera depășește granițele contextului în care a apărut și propune o reflecție universală, valabilă dincolo de timp și spațiu. ${item.autor} confirmă, prin această operă, statutul de creator de referință al patrimoniului literar național.</p>
+          <p id="ef-concluzie">${(overrides && overrides.concluzie) ? overrides.concluzie : (item.opera + " de " + item.autor + " rămâne o creație definitorie pentru " + e.curent + " și pentru literatura română în ansamblu. Prin " + e.tema + ", opera depășește granițele contextului în care a apărut și propune o reflecție universală, valabilă dincolo de timp și spațiu. " + item.autor + " confirmă, prin această operă, statutul de creator de referință al patrimoniului literar național.")}</p>
         </div>
       </div>
     `;
@@ -1241,6 +1248,8 @@
     // Attach editable handlers if admin
     if (isAdmin) {
       makeEditable(body.querySelector("#ef-bio"), id, "biografie");
+      makeEditable(body.querySelector("#ef-introducere"), id, "introducere");
+      makeEditable(body.querySelector("#ef-concluzie"), id, "concluzie");
       makeEditable(body.querySelector("#ef-tema"), id, "tema");
       makeEditable(body.querySelector("#ef-tema2"), id, "tema");
       makeEditable(body.querySelector("#ef-specie"), id, "specie");
@@ -1267,7 +1276,7 @@
 
   // ─── FIREBASE LISTEN ─────────────────────────────────────────────────────
   function listenAll() {
-    OPERE.forEach(item => {
+    getAllOpere().forEach(item => {
       const ref = doc(db, "voturi", item.id);
       onSnapshot(ref, snap => {
         latestData[item.id] = snap.exists() ? snap.data() : { count: 0 };
@@ -1288,6 +1297,103 @@
   }
 
 
+
+  // ─── ADMIN: ADAUGĂ / ȘTERGE OPERE ────────────────────────────────────────────
+
+  function generateId(autor, opera) {
+    return (autor + "-" + opera)
+      .toLowerCase()
+      .normalize("NFD").replace(/[\u0300-\u036f]/g, "")
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-|-$/g, "")
+      .substring(0, 50);
+  }
+
+  function showAddOperaModal() {
+    const m = document.getElementById("add-opera-modal");
+    m.classList.add("open");
+    document.body.style.overflow = "hidden";
+  }
+
+  function closeAddOperaModal() {
+    document.getElementById("add-opera-modal").classList.remove("open");
+    document.body.style.overflow = "";
+    document.getElementById("add-opera-form").reset();
+  }
+
+  async function adminSaveOpera(e) {
+    e.preventDefault();
+    const F = id => document.getElementById(id).value.trim();
+    const autor = F("ao-autor");
+    const opera = F("ao-opera");
+    const gen = F("ao-gen");
+    const categorie = F("ao-categorie");
+    const perioada = F("ao-perioada");
+    const nastere = F("ao-nastere");
+    const deces = F("ao-deces");
+    const fotografie = F("ao-fotografie");
+    const biografie = F("ao-biografie");
+
+    const id = generateId(autor, opera);
+
+    const eseu = {
+      curent: F("ao-curent"),
+      specie: F("ao-specie"),
+      tema: F("ao-tema"),
+      incadrare: [
+        { element: F("ao-inc0-el"), comentariu: F("ao-inc0-com") },
+        { element: F("ao-inc1-el"), comentariu: F("ao-inc1-com") }
+      ],
+      secvente: [
+        { titlu: F("ao-sec0-tit"), comentariu: F("ao-sec0-com") },
+        { titlu: F("ao-sec1-tit"), comentariu: F("ao-sec1-com") }
+      ],
+      structura: [
+        { element: F("ao-str0-el"), comentariu: F("ao-str0-com") },
+        { element: F("ao-str1-el"), comentariu: F("ao-str1-com") }
+      ]
+    };
+
+    const operaObj = { id, autor, opera, gen, categorie, nastere, deces, fotografie, biografie, eseu };
+    if (perioada) operaObj.perioada = perioada;
+
+    try {
+      const btn = document.getElementById("ao-save-btn");
+      btn.textContent = "Se salvează...";
+      btn.disabled = true;
+      await setDoc(doc(db, "opere_custom", id), operaObj);
+      OPERE_CUSTOM.push({ ...operaObj, _custom: true });
+      latestData[id] = { count: 0 };
+      renderList(latestData);
+      closeAddOperaModal();
+      alert("Opera a fost adăugată cu succes!");
+    } catch(err) {
+      alert("Eroare la salvare: " + err.message);
+      const btn = document.getElementById("ao-save-btn");
+      btn.textContent = "Salvează opera";
+      btn.disabled = false;
+    }
+  }
+
+  async function adminDeleteOpera(id) {
+    const item = getAllOpere().find(o => o.id === id);
+    if (!item) return;
+    if (!item._custom) {
+      alert("Nu poți șterge operele din lista originală — doar pe cele adăugate de tine.");
+      return;
+    }
+    if (!confirm(`Ștergi opera "${item.opera}"? Se va șterge și din Firestore.`)) return;
+    try {
+      await deleteDoc(doc(db, "opere_custom", id));
+      await deleteDoc(doc(db, "voturi", id));
+      OPERE_CUSTOM = OPERE_CUSTOM.filter(o => o.id !== id);
+      delete latestData[id];
+      renderList(latestData);
+    } catch(err) {
+      alert("Eroare: " + err.message);
+    }
+  }
+
   // ─── ADMIN ───────────────────────────────────────────────────────────────────
   const ADMIN_PASSWORD = "bac2026admin"; // schimbă parola
   let isAdmin = sessionStorage.getItem("bac_admin") === "1";
@@ -1299,10 +1405,12 @@
       bar.innerHTML = `
         <div class="admin-bar-inner">
           <span class="admin-badge">⚙️ ADMIN ACTIV</span>
+          <button class="admin-btn green" id="btn-add-opera">＋ Adaugă operă</button>
           <button class="admin-btn danger" id="btn-reset-all">🗑 Șterge toate voturile</button>
           <button class="admin-btn" id="btn-reset-me">↩ Reset vot propriu</button>
           <button class="admin-btn dim" id="btn-logout-admin">✕ Ieși</button>
         </div>`;
+      document.getElementById("btn-add-opera").addEventListener("click", showAddOperaModal);
       document.getElementById("btn-reset-all").addEventListener("click", adminResetAll);
       document.getElementById("btn-reset-me").addEventListener("click", adminResetMe);
       document.getElementById("btn-logout-admin").addEventListener("click", () => {
@@ -1333,9 +1441,9 @@
   async function adminResetAll() {
     if (!confirm("Ștergi TOATE voturile din Firestore? Nu se poate anula.")) return;
     try {
-      const promises = OPERE.map(o => deleteDoc(doc(db, "voturi", o.id)));
+      const promises = getAllOpere().map(o => deleteDoc(doc(db, "voturi", o.id)));
       await Promise.all(promises);
-      OPERE.forEach(o => latestData[o.id] = { count: 0 });
+      getAllOpere().forEach(o => latestData[o.id] = { count: 0 });
       // Resetează și localStorage-ul adminului
       localStorage.removeItem("bac_voturi_set");
       localStorage.removeItem("bac_vot_opera");
@@ -1390,15 +1498,35 @@
     }
   }
 
-  window.addEventListener("DOMContentLoaded", () => {
+  async function loadOpereCustom() {
+    try {
+      const snap = await getDocs(collection(db, "opere_custom"));
+      OPERE_CUSTOM = [];
+      snap.forEach(d => {
+        const data = d.data();
+        OPERE_CUSTOM.push({ ...data, id: d.id, _custom: true });
+      });
+    } catch(e) {
+      console.error("Eroare la încărcare opere custom:", e);
+    }
+  }
+
+  window.addEventListener("DOMContentLoaded", async () => {
     OPERE.forEach(o => latestData[o.id] = { count: 0 });
     renderList(latestData);
     renderAdminBar();
     setupFilters();
+    await loadOpereCustom();
+    OPERE_CUSTOM.forEach(o => latestData[o.id] = { count: 0 });
+    renderList(latestData);
     listenAll();
 
     // Close modal
     document.getElementById("modal-close").addEventListener("click", closeModal);
+    document.getElementById("add-opera-form").addEventListener("submit", adminSaveOpera);
+    document.getElementById("add-opera-modal").addEventListener("click", e => {
+      if (e.target === document.getElementById("add-opera-modal")) closeAddOperaModal();
+    });
     document.getElementById("modal").addEventListener("click", e => {
       if (e.target === document.getElementById("modal")) closeModal();
     });
@@ -1482,6 +1610,154 @@
   .admin-btn.dim { background: transparent; color: #6b7280; border-color: #374151; }
   .admin-btn.dim:hover { background: #1f2937; color: #fff; }
 
+
+
+  /* ── MODAL ADAUGĂ OPERĂ ── */
+  #add-opera-modal {
+    display: none;
+    position: fixed;
+    inset: 0;
+    background: rgba(15,10,5,0.75);
+    z-index: 1002;
+    align-items: flex-start;
+    justify-content: center;
+    padding: 1rem;
+    backdrop-filter: blur(4px);
+    overflow-y: auto;
+  }
+  #add-opera-modal.open { display: flex; }
+  .add-opera-inner {
+    background: var(--card-bg);
+    border-radius: 16px;
+    max-width: 680px;
+    width: 100%;
+    margin: auto;
+    box-shadow: 0 24px 64px rgba(0,0,0,0.35);
+    animation: modalIn 0.2s ease;
+    overflow: hidden;
+  }
+  .add-opera-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 1.2rem 1.5rem;
+    background: #0f3d1f;
+    color: #fff;
+  }
+  .add-opera-header h2 {
+    font-family: 'Playfair Display', serif;
+    font-size: 1.2rem;
+    font-weight: 700;
+    margin: 0;
+  }
+  .add-opera-close {
+    background: transparent;
+    border: none;
+    color: #9ca3af;
+    font-size: 1.1rem;
+    cursor: pointer;
+    padding: 0.2rem 0.5rem;
+    border-radius: 4px;
+    transition: color 0.15s;
+  }
+  .add-opera-close:hover { color: #fff; }
+  .add-opera-form { padding: 1.5rem; display: flex; flex-direction: column; gap: 0.8rem; }
+  .ao-section-title {
+    font-size: 0.7rem;
+    font-weight: 700;
+    letter-spacing: 1.5px;
+    text-transform: uppercase;
+    color: var(--accent);
+    padding-bottom: 0.4rem;
+    border-bottom: 1.5px solid var(--border);
+    margin-top: 0.5rem;
+  }
+  .ao-subsection {
+    font-size: 0.75rem;
+    font-weight: 600;
+    color: var(--ink-soft);
+    background: var(--bg);
+    padding: 0.4rem 0.8rem;
+    border-radius: 6px;
+    margin-top: 0.3rem;
+  }
+  .ao-row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 0.8rem; }
+  .ao-row3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 0.8rem; }
+  .ao-field { display: flex; flex-direction: column; gap: 0.3rem; }
+  .ao-field label {
+    font-size: 0.75rem;
+    font-weight: 600;
+    color: var(--ink-soft);
+    letter-spacing: 0.2px;
+  }
+  .ao-field input,
+  .ao-field select,
+  .ao-field textarea {
+    border: 1.5px solid var(--border);
+    border-radius: 7px;
+    padding: 0.5rem 0.7rem;
+    font-family: 'Inter', sans-serif;
+    font-size: 0.85rem;
+    color: var(--ink);
+    background: var(--bg);
+    outline: none;
+    transition: border-color 0.15s;
+    resize: vertical;
+  }
+  .ao-field input:focus,
+  .ao-field select:focus,
+  .ao-field textarea:focus { border-color: var(--accent); background: #fff; }
+  .ao-actions {
+    display: flex;
+    gap: 0.7rem;
+    padding-top: 0.5rem;
+    border-top: 1.5px solid var(--border);
+    margin-top: 0.5rem;
+  }
+  .ao-save-btn {
+    background: #1a6b3a;
+    color: #fff;
+    border: none;
+    border-radius: 8px;
+    padding: 0.7rem 1.5rem;
+    font-size: 0.9rem;
+    font-weight: 700;
+    font-family: 'Inter', sans-serif;
+    cursor: pointer;
+    transition: background 0.15s;
+  }
+  .ao-save-btn:hover { background: #22914d; }
+  .ao-save-btn:disabled { background: #6b7280; cursor: not-allowed; }
+  .ao-cancel-btn {
+    background: transparent;
+    color: var(--ink-faint);
+    border: 1.5px solid var(--border);
+    border-radius: 8px;
+    padding: 0.7rem 1rem;
+    font-size: 0.85rem;
+    font-family: 'Inter', sans-serif;
+    cursor: pointer;
+  }
+  .ao-cancel-btn:hover { color: var(--ink); border-color: #9ca3af; }
+  .admin-btn.green { background: #1a6b3a; border-color: #2d9d5a; }
+  .admin-btn.green:hover { background: #22914d; }
+  .delete-opera-btn {
+    margin-left: 0.8rem;
+    background: transparent;
+    border: 1px solid #dc2626;
+    color: #dc2626;
+    border-radius: 5px;
+    padding: 0.15rem 0.55rem;
+    font-size: 0.72rem;
+    cursor: pointer;
+    font-family: 'Inter', sans-serif;
+    font-weight: 600;
+    transition: all 0.15s;
+  }
+  .delete-opera-btn:hover { background: #fef2f2; }
+  @media (max-width: 560px) {
+    .ao-row2, .ao-row3 { grid-template-columns: 1fr; }
+  }
 
   /* ── PRE-MODAL ── */
   #pre-modal {
@@ -2226,6 +2502,107 @@
 <footer>
   Un dispozitiv · un vot · date publice anonime
 </footer>
+
+
+<!-- MODAL ADAUGĂ OPERĂ -->
+<div id="add-opera-modal">
+  <div class="add-opera-inner">
+    <div class="add-opera-header">
+      <h2>＋ Adaugă operă nouă</h2>
+      <button class="add-opera-close" onclick="closeAddOperaModal()">✕</button>
+    </div>
+    <form id="add-opera-form" class="add-opera-form">
+
+      <div class="ao-section-title">Informații generale</div>
+      <div class="ao-row2">
+        <div class="ao-field">
+          <label>Autor *</label>
+          <input id="ao-autor" type="text" placeholder="ex: Liviu Rebreanu" required>
+        </div>
+        <div class="ao-field">
+          <label>Opera *</label>
+          <input id="ao-opera" type="text" placeholder="ex: Ion" required>
+        </div>
+      </div>
+      <div class="ao-row2">
+        <div class="ao-field">
+          <label>Categorie *</label>
+          <select id="ao-categorie" required>
+            <option value="">Alege...</option>
+            <option value="Epic">Epic</option>
+            <option value="Liric">Liric</option>
+            <option value="Dramatic">Dramatic</option>
+          </select>
+        </div>
+        <div class="ao-field">
+          <label>Gen / Specie literară *</label>
+          <input id="ao-gen" type="text" placeholder="ex: roman realist" required>
+        </div>
+      </div>
+      <div class="ao-row3">
+        <div class="ao-field">
+          <label>Perioadă</label>
+          <input id="ao-perioada" type="text" placeholder="ex: interbelică">
+        </div>
+        <div class="ao-field">
+          <label>Anul nașterii</label>
+          <input id="ao-nastere" type="text" placeholder="ex: 1885">
+        </div>
+        <div class="ao-field">
+          <label>Anul decesului</label>
+          <input id="ao-deces" type="text" placeholder="ex: 1944">
+        </div>
+      </div>
+      <div class="ao-field">
+        <label>URL fotografie autor</label>
+        <input id="ao-fotografie" type="url" placeholder="https://upload.wikimedia.org/...">
+      </div>
+      <div class="ao-field">
+        <label>Biografie scurtă</label>
+        <textarea id="ao-biografie" rows="2" placeholder="Câteva rânduri despre autor..."></textarea>
+      </div>
+
+      <div class="ao-section-title">Eseu BAC</div>
+      <div class="ao-row2">
+        <div class="ao-field">
+          <label>Curent literar *</label>
+          <input id="ao-curent" type="text" placeholder="ex: realism" required>
+        </div>
+        <div class="ao-field">
+          <label>Specie literară *</label>
+          <input id="ao-specie" type="text" placeholder="ex: roman" required>
+        </div>
+      </div>
+      <div class="ao-field">
+        <label>Tema operei *</label>
+        <input id="ao-tema" type="text" placeholder="ex: condiția țăranului și patima pentru pământ" required>
+      </div>
+
+      <div class="ao-subsection">I. Încadrare în curent / specie</div>
+      <div class="ao-field"><label>Element 1 — titlu</label><input id="ao-inc0-el" type="text" placeholder="ex: Obiectivitatea narativă"></div>
+      <div class="ao-field"><label>Element 1 — comentariu</label><textarea id="ao-inc0-com" rows="3" placeholder="Comentariu detaliat..."></textarea></div>
+      <div class="ao-field"><label>Element 2 — titlu</label><input id="ao-inc1-el" type="text" placeholder="ex: Conflictul interior"></div>
+      <div class="ao-field"><label>Element 2 — comentariu</label><textarea id="ao-inc1-com" rows="3" placeholder="Comentariu detaliat..."></textarea></div>
+
+      <div class="ao-subsection">II. Tema — secvențe comentate</div>
+      <div class="ao-field"><label>Secvența 1 — titlu</label><input id="ao-sec0-tit" type="text" placeholder="ex: Sărutul pământului"></div>
+      <div class="ao-field"><label>Secvența 1 — comentariu</label><textarea id="ao-sec0-com" rows="3" placeholder="Comentariu detaliat..."></textarea></div>
+      <div class="ao-field"><label>Secvența 2 — titlu</label><input id="ao-sec1-tit" type="text" placeholder="ex: Moartea Anei"></div>
+      <div class="ao-field"><label>Secvența 2 — comentariu</label><textarea id="ao-sec1-com" rows="3" placeholder="Comentariu detaliat..."></textarea></div>
+
+      <div class="ao-subsection">III. Elemente de structură</div>
+      <div class="ao-field"><label>Element 1 — titlu</label><input id="ao-str0-el" type="text" placeholder="ex: Compoziția circulară"></div>
+      <div class="ao-field"><label>Element 1 — comentariu</label><textarea id="ao-str0-com" rows="3" placeholder="Comentariu detaliat..."></textarea></div>
+      <div class="ao-field"><label>Element 2 — titlu</label><input id="ao-str1-el" type="text" placeholder="ex: Tehnica planurilor paralele"></div>
+      <div class="ao-field"><label>Element 2 — comentariu</label><textarea id="ao-str1-com" rows="3" placeholder="Comentariu detaliat..."></textarea></div>
+
+      <div class="ao-actions">
+        <button type="submit" id="ao-save-btn" class="ao-save-btn">Salvează opera</button>
+        <button type="button" class="ao-cancel-btn" onclick="closeAddOperaModal()">Anulează</button>
+      </div>
+    </form>
+  </div>
+</div>
 
 <!-- PRE-MODAL amuzant -->
 <div id="pre-modal">
