@@ -772,7 +772,10 @@
 
   // Opere custom adăugate din admin
   let OPERE_CUSTOM = [];
-  function getAllOpere() { return [...OPERE, ...OPERE_CUSTOM]; }
+  let OPERE_ASCUNSE = new Set();
+  function getAllOpere() {
+    return [...OPERE, ...OPERE_CUSTOM].filter(o => !OPERE_ASCUNSE.has(o.id));
+  }
 
   // Voturi multiple — set de id-uri
   let votedSet = new Set(JSON.parse(localStorage.getItem("bac_voturi_set") || "[]"));
@@ -847,7 +850,7 @@
         </div>
         <div class="stats-line">
           ${count} ${count === 1 ? "vot" : "voturi"}
-          ${isAdmin && item._custom ? `<button class="delete-opera-btn" data-id="${item.id}">🗑 Șterge opera</button>` : ""}
+          ${isAdmin ? `<button class="delete-opera-btn" data-id="${item.id}">🗑 Șterge opera</button>` : ""}
         </div>
       `;
       container.appendChild(card);
@@ -1378,19 +1381,35 @@
     }
   }
 
+  // Opere originale ascunse de admin (salvate în Firestore)
+
+  async function loadOpereAscunse() {
+    try {
+      const snap = await getDoc(doc(db, "admin_settings", "opere_ascunse"));
+      if (snap.exists()) {
+        OPERE_ASCUNSE = new Set(snap.data().ids || []);
+      }
+    } catch(e) {}
+  }
+
   async function adminDeleteOpera(id) {
     const item = getAllOpere().find(o => o.id === id);
     if (!item) return;
-    if (!item._custom) {
-      alert("Nu poți șterge operele din lista originală — doar pe cele adăugate de tine.");
-      return;
-    }
-    if (!confirm(`Ștergi opera "${item.opera}"? Se va șterge și din Firestore.`)) return;
+    if (!confirm(`Ascunzi opera "${item.opera}" din listă? Voturile rămân în Firestore.`)) return;
     try {
-      await deleteDoc(doc(db, "opere_custom", id));
-      await deleteDoc(doc(db, "voturi", id));
-      OPERE_CUSTOM = OPERE_CUSTOM.filter(o => o.id !== id);
-      delete latestData[id];
+      if (item._custom) {
+        // Operă custom — șterge complet din Firestore
+        await deleteDoc(doc(db, "opere_custom", id));
+        await deleteDoc(doc(db, "voturi", id));
+        OPERE_CUSTOM = OPERE_CUSTOM.filter(o => o.id !== id);
+        delete latestData[id];
+      } else {
+        // Operă originală — adaugă în lista neagră
+        OPERE_ASCUNSE.add(id);
+        await setDoc(doc(db, "admin_settings", "opere_ascunse"), {
+          ids: [...OPERE_ASCUNSE]
+        });
+      }
       renderList(latestData);
     } catch(err) {
       alert("Eroare: " + err.message);
@@ -1519,6 +1538,7 @@
     renderList(latestData);
     renderAdminBar();
     setupFilters();
+    await loadOpereAscunse();
     await loadOpereCustom();
     OPERE_CUSTOM.forEach(o => latestData[o.id] = { count: 0 });
     renderList(latestData);
