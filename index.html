@@ -770,9 +770,12 @@
     }
   ];
 
+  // Opere custom adăugate din admin
+  let OPERE_CUSTOM = [];
+  function getAllOpere() { return [...OPERE, ...OPERE_CUSTOM]; }
+
   // Voturi multiple — set de id-uri
   let votedSet = new Set(JSON.parse(localStorage.getItem("bac_voturi_set") || "[]"));
-  function getAllOpere() { return [...OPERE, ...OPERE_CUSTOM]; }
   function saveVotedSet() { localStorage.setItem("bac_voturi_set", JSON.stringify([...votedSet])); }
   // compatibilitate cu votul vechi
   const _oldVote = localStorage.getItem("bac_vot_opera");
